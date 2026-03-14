@@ -22,9 +22,9 @@ CKTN-ELECTRA/
     │   │   ├── khmer_dev.json
     │   │   └── tay_nung_dev.json
     │   └── train/
-    │   │   ├── cham_train.json
-    │   │   ├── khmer_train.json
-    │   │   └── tay_nung_train.json
+    │       ├── cham_train.json
+    │       ├── khmer_train.json
+    │       └── tay_nung_train.json
     ├── half_and_no_linear_lambda_variant/
     ├── half_generator_variant/
     ├── quarter_and_no_linear_lambda_variant/
