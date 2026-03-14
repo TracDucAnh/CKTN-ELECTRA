@@ -33,7 +33,7 @@ DISCRIMINATOR_CHECKPOINT = "ducanhdinh/CKTN-EKECTRA"
 
 # Training hyper-parameters (from paper)
 TRAINING_CONFIG = dict(
-    total_epochs   = 6,
+    total_epochs   = 5,
     mask_rate      = 0.15,
     seq_len        = 512,
     lr             = 2e-5,
@@ -44,7 +44,7 @@ TRAINING_CONFIG = dict(
     # Lambda schedule (epoch boundaries, 1-indexed)
     lambda_zero_until_epoch   = 2,   # epochs 1-2 : λ = 0
     lambda_ramp_until_epoch   = 3,   # epoch  2-3 : linear ramp
-    lambda_fixed_from_epoch   = 4,   # epochs 4-6 : λ = λ_max
+    lambda_fixed_from_epoch   = 3,   # epochs 4-5 : λ = λ_max
 )
 
 
@@ -113,15 +113,15 @@ class SharedEmbeddings(nn.Module):
     def __init__(self, config: RemBertConfig):
         super().__init__()
         self.word_embeddings = nn.Embedding(
-            config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id
+            config.vocab_size, config.input_embedding_size, padding_idx=config.pad_token_id
         )
         self.position_embeddings = nn.Embedding(
-            config.max_position_embeddings, config.embedding_size
+            config.max_position_embeddings, config.input_embedding_size
         )
         self.token_type_embeddings = nn.Embedding(
-            config.type_vocab_size, config.embedding_size
+            config.type_vocab_size, config.input_embedding_size
         )
-        self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(config.input_embedding_size, eps=config.layer_norm_eps)
         self.dropout   = nn.Dropout(config.hidden_dropout_prob)
 
         self.register_buffer(
@@ -183,11 +183,11 @@ class GeneratorMLMHead(nn.Module):
 
     def __init__(self, config: RemBertConfig):
         super().__init__()
-        self.dense      = nn.Linear(config.hidden_size, config.embedding_size)
+        self.dense      = nn.Linear(config.hidden_size, config.input_embedding_size)
         self.act        = nn.GELU()
-        self.layer_norm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.input_embedding_size, eps=config.layer_norm_eps)
         # Output projection: NOT shared with discriminator (standard ELECTRA)
-        self.decoder    = nn.Linear(config.embedding_size, config.vocab_size, bias=True)
+        self.decoder    = nn.Linear(config.input_embedding_size, config.vocab_size, bias=True)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         x = self.layer_norm(self.act(self.dense(hidden_states)))
@@ -204,7 +204,7 @@ class Generator(nn.Module):
         super().__init__()
         self.config = config
         # Input projection: embedding_size → hidden_size (same as disc)
-        self.embeddings_project = nn.Linear(config.embedding_size, config.hidden_size)
+        self.embeddings_project = nn.Linear(config.input_embedding_size, config.hidden_size)
         # Encoder layers only (no embedding table — that comes from SharedEmbeddings)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model         = config.hidden_size,
@@ -259,37 +259,43 @@ class Discriminator(nn.Module):
     """
     Full RemBERT encoder (32 layers) initialized from CKTN-EKECTRA checkpoint.
     Embeddings are replaced with the shared ones from CKTNElectra.
+
+    Architecture:
+      SharedEmbeddings output [B, L, input_embedding_size=256]
+        → RemBertEncoder.embedding_hidden_mapping_in [256 → 1152]  (internal to encoder)
+        → RemBertEncoder transformer layers [32 layers]
+        → RTDHead → logits [B, L, 1]
+
+    NOTE: RemBertEncoder already contains its own Linear projection
+    (embedding_hidden_mapping_in: input_embedding_size → hidden_size).
+    We do NOT add an extra embeddings_project — we pass the 256-dim
+    SharedEmbeddings output directly into the encoder.
     """
 
     def __init__(self, config: RemBertConfig):
         super().__init__()
         self.config = config
-        # Input projection: embedding_size → hidden_size
-        self.embeddings_project = nn.Linear(config.embedding_size, config.hidden_size)
-        # Encoder (no embedding table — replaced by SharedEmbeddings)
-        # We keep the RemBERT encoder as-is; only its embedding layer is overridden.
-        self.encoder  = None          # populated in CKTNElectra.__init__
+        # RemBertEncoder includes embedding_hidden_mapping_in(256→1152) internally
+        from transformers.models.rembert.modeling_rembert import RemBertEncoder
+        self.encoder  = RemBertEncoder(config)
         self.rtd_head = DiscriminatorRTDHead(config.hidden_size)
 
     def forward(
         self,
-        embedded:       torch.Tensor,
+        embedded:       torch.Tensor,           # [B, L, input_embedding_size=256]
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Returns per-token RTD logits [B, L, 1]."""
-        x = self.embeddings_project(embedded)
-
-        # Build extended attention mask compatible with HF encoder
+        # Build 4-D attention mask for HF encoder: additive, 0=attend, -inf=ignore
         if attention_mask is not None:
             ext_mask = (1.0 - attention_mask[:, None, None, :].float()) * -10000.0
         else:
             ext_mask = None
 
-        encoder_out = self.encoder(
-            hidden_states      = x,
-            attention_mask     = ext_mask,
-        )
-        return self.rtd_head(encoder_out.last_hidden_state)
+        # encoder applies embedding_hidden_mapping_in(256→1152) on first line
+        enc_out = self.encoder(hidden_states=embedded, attention_mask=ext_mask)
+        hidden  = enc_out[0]                    # [B, L, hidden_size=1152]
+        return self.rtd_head(hidden)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -323,7 +329,7 @@ class CKTNElectra(nn.Module):
         print(f"[Discriminator] vocab_size={disc_config.vocab_size}, "
               f"layers={disc_config.num_hidden_layers}, "
               f"hidden={disc_config.hidden_size}, "
-              f"embedding_size={disc_config.embedding_size}")
+              f"embedding_size={disc_config.input_embedding_size}")
 
         # ── Shared embeddings (init from discriminator checkpoint) ────────────
         self.shared_embeddings = SharedEmbeddings(disc_config)
@@ -345,17 +351,17 @@ class CKTNElectra(nn.Module):
     def _load_pretrained_discriminator(self, disc_config: RemBertConfig):
         """
         Load CKTN-EKECTRA weights into:
-          - shared_embeddings  (word, position, token_type, LayerNorm)
+          - shared_embeddings        (word, position, token_type, LayerNorm)
           - discriminator.embeddings_project
           - discriminator.encoder
         Generator is intentionally left randomly initialized.
         """
         print(f"[Loading] {DISCRIMINATOR_CHECKPOINT} ...")
         base_model = AutoModel.from_pretrained(
-            DISCRIMINATOR_CHECKPOINT, use_fast=False
+            DISCRIMINATOR_CHECKPOINT
         )
 
-        # Copy shared embeddings from the checkpoint's embedding layer
+        # ── Copy shared embeddings from checkpoint ────────────────────────────
         src_emb = base_model.embeddings
         dst_emb = self.shared_embeddings
 
@@ -371,16 +377,10 @@ class CKTNElectra(nn.Module):
         dst_emb.LayerNorm.weight.data.copy_(src_emb.LayerNorm.weight.data)
         dst_emb.LayerNorm.bias.data.copy_(src_emb.LayerNorm.bias.data)
 
-        # Copy embeddings_project
-        self.discriminator.embeddings_project.weight.data.copy_(
-            base_model.embeddings_project.weight.data
+        # ── Copy encoder (includes embedding_hidden_mapping_in + 32 layers) ────
+        self.discriminator.encoder.load_state_dict(
+            base_model.encoder.state_dict()
         )
-        self.discriminator.embeddings_project.bias.data.copy_(
-            base_model.embeddings_project.bias.data
-        )
-
-        # Attach the full encoder to discriminator
-        self.discriminator.encoder = base_model.encoder
 
         print("[Loading] Done — discriminator weights loaded; generator is random.")
         del base_model
@@ -576,11 +576,11 @@ if __name__ == "__main__":
     import os
 
     print("=" * 70)
-    print("CKTN-ELECTRA — architecture smoke-test (load_pretrained=False)")
+    print("CKTN-ELECTRA — architecture smoke-test (load_pretrained = True)")
     print("=" * 70)
 
     # Instantiate without loading 0.6 B param checkpoint for quick test
-    model = CKTNElectra(load_pretrained=False)
+    model = CKTNElectra(load_pretrained=True)
 
     disc_layers = model.discriminator.config.num_hidden_layers
     gen_layers  = model.generator.config.num_hidden_layers

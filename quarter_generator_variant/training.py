@@ -38,6 +38,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ def tokenize_and_chunk(
     sep_id = tokenizer.sep_token_id
 
     chunks: List[List[int]] = []
-    for text in contents:
+    for text in tqdm(contents, desc="  Tokenizing", leave=False):
         # Tokenize without special tokens; truncation=False to keep all tokens
         token_ids = tokenizer.encode(
             text,
@@ -309,10 +310,9 @@ def evaluate(
     all_rtd_labels  = []
     n_batches       = 0
 
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc="  Evaluating", leave=False):
         batch = {k: v.to(device) for k, v in batch.items()}
 
-        # We need original input_ids to build RTD labels — replicate logic from forward
         out = model(
             input_ids      = batch["input_ids"],
             attention_mask = batch["attention_mask"],
@@ -330,32 +330,17 @@ def evaluate(
             disc_logits = out["disc_logits"].squeeze(-1)  # [B, L]
             preds = (torch.sigmoid(disc_logits) > 0.5).long()
 
-            # Build RTD labels: 1 if position was replaced (gen sample != original)
-            # We can reconstruct from labels: masked positions have labels != -100
             labels_tensor = batch["labels"]  # [B, L]   -100 = not masked
             is_masked = labels_tensor != -100  # [B, L]
 
-            # attention mask to ignore padding
             attn_mask = batch["attention_mask"].bool()  # [B, L]
             eval_mask = is_masked & attn_mask
 
             if eval_mask.any():
-                # RTD ground truth for masked positions: were they replaced?
-                # Sampled token ≠ original → replaced=1
-                # We retrieve the same sampled_ids via generator logits
-                # (already computed inside forward; we approximate by reading disc logits)
-                # Instead, use the actual RTD labels that the model computes internally:
-                # replaced = (corrupted_ids != input_ids) at masked positions.
-                # To get these we'd need to re-run; simpler: predict vs the stored
-                # disc_logits already account for them.  Use model output directly.
+                gen_logits   = out["gen_logits"]           # [B, L, V]
+                gen_pred_ids = gen_logits.argmax(dim=-1)   # [B, L]
 
-                # We compare the generator's most-likely token vs original
-                gen_logits = out["gen_logits"]  # [B, L, V]
-                gen_pred_ids = gen_logits.argmax(dim=-1)  # [B, L]
-
-                # Get the original ids at masked positions from labels
                 original_at_mask = labels_tensor.clone()
-                # Where not masked, fill with input (doesn't matter, won't be used)
                 original_at_mask[~is_masked] = batch["input_ids"][~is_masked]
 
                 rtd_true = (gen_pred_ids != original_at_mask).long()  # [B, L]
@@ -402,7 +387,6 @@ def save_checkpoint(
     disc_path = DISC_DIR / f"discriminator_{suffix}.pt"
     gen_path  = GEN_DIR  / f"generator_{suffix}.pt"
 
-    # Save discriminator (encoder + rtd_head + embeddings_project)
     disc_state = {
         "encoder":              model.discriminator.encoder.state_dict(),
         "rtd_head":             model.discriminator.rtd_head.state_dict(),
@@ -413,7 +397,6 @@ def save_checkpoint(
     }
     torch.save(disc_state, disc_path)
 
-    # Save generator
     gen_state = {
         "generator":  model.generator.state_dict(),
         "epoch":      epoch,
@@ -421,7 +404,6 @@ def save_checkpoint(
     }
     torch.save(gen_state, gen_path)
 
-    # If best, also save as 'best'
     if is_best:
         torch.save(disc_state, DISC_DIR / "discriminator_best.pt")
         torch.save(gen_state,  GEN_DIR  / "generator_best.pt")
@@ -446,10 +428,10 @@ def plot_and_save_graphs(report: List[Dict]):
     fig.suptitle("CKTN-ELECTRA Training Metrics", fontsize=22)
 
     plot_specs = [
-        ("avg_mlm_loss", "MLM Loss",      "MLM Loss per Epoch",       "Loss"),
-        ("avg_rtd_loss", "RTD Loss",      "RTD Loss per Epoch",       "Loss"),
-        ("accuracy",     "Accuracy",      "RTD Accuracy per Epoch",   "Accuracy"),
-        ("f1",           "F1 Score",      "RTD F1 Score per Epoch",   "F1"),
+        ("avg_mlm_loss", "MLM Loss",  "MLM Loss per Epoch",     "Loss"),
+        ("avg_rtd_loss", "RTD Loss",  "RTD Loss per Epoch",     "Loss"),
+        ("accuracy",     "Accuracy",  "RTD Accuracy per Epoch", "Accuracy"),
+        ("f1",           "F1 Score",  "RTD F1 Score per Epoch", "F1"),
     ]
 
     for ax, (key, label, title, ylabel) in zip(axes.flat, plot_specs):
@@ -468,7 +450,6 @@ def plot_and_save_graphs(report: List[Dict]):
     plt.close()
     print(f"[Graph] Saved: {out_path}")
 
-    # Also save individual graphs
     for key, label, title, ylabel in plot_specs:
         fig2, ax2 = plt.subplots(figsize=(8, 6))
         values = [r[key] for r in report]
@@ -546,8 +527,8 @@ def main():
     print(f"[Model] Running on device: {DEVICE}")
 
     # ── 8.4 Optimizer & LR scheduler ─────────────────────────────────────────
-    param_groups   = get_parameter_groups(model, WEIGHT_DECAY)
-    optimizer      = torch.optim.AdamW(param_groups, lr=LR)
+    param_groups    = get_parameter_groups(model, WEIGHT_DECAY)
+    optimizer       = torch.optim.AdamW(param_groups, lr=LR)
 
     steps_per_epoch = len(train_loader)
     total_steps     = TOTAL_EPOCHS * steps_per_epoch
@@ -568,16 +549,16 @@ def main():
         steps_per_epoch   = steps_per_epoch,
     )
 
-    print(f"\n[Training] Steps per epoch: {steps_per_epoch}")
-    print(f"[Training] Total steps: {total_steps} | Warmup: {warmup_steps}")
-    print(f"[Training] Lambda schedule: 0 until epoch {TRAINING_CONFIG['lambda_zero_until_epoch']}, "
+    print(f"\n[Training] Steps per epoch : {steps_per_epoch}")
+    print(f"[Training] Total steps     : {total_steps} | Warmup: {warmup_steps}")
+    print(f"[Training] Lambda schedule : 0 until epoch {TRAINING_CONFIG['lambda_zero_until_epoch']}, "
           f"ramp to {LAMBDA_MAX} by epoch {TRAINING_CONFIG['lambda_ramp_until_epoch']}, "
           f"fixed afterwards.\n")
 
     # ── 8.6 Training state ────────────────────────────────────────────────────
     report: List[Dict] = []
-    best_f1      = -1.0
-    global_step  = 0
+    best_f1     = -1.0
+    global_step = 0
 
     model.train()
 
@@ -586,11 +567,12 @@ def main():
         print(f"Epoch {epoch}/{TOTAL_EPOCHS}")
         print(f"{'='*60}")
 
-        epoch_mlm_loss  = 0.0
-        epoch_rtd_loss  = 0.0
-        n_batches       = 0
+        epoch_mlm_loss = 0.0
+        epoch_rtd_loss = 0.0
+        n_batches      = 0
 
-        for batch_idx, batch in enumerate(train_loader):
+        pbar = tqdm(train_loader, desc=f"  Training", leave=True)
+        for batch in pbar:
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
             lam   = lambda_scheduler.get_lambda(global_step)
 
@@ -614,18 +596,14 @@ def main():
             n_batches      += 1
             global_step    += 1
 
-            if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == len(train_loader):
-                print(
-                    f"  Step {batch_idx+1}/{len(train_loader)} | "
-                    f"lambda={lam:.2f} | "
-                    f"loss={loss.item():.4f} | "
-                    f"mlm={outputs['loss_mlm'].item():.4f} | "
-                    f"rtd={outputs['loss_disc'].item():.4f}"
-                )
+            pbar.set_postfix({
+                "λ":    f"{lam:.1f}",
+                "loss": f"{loss.item():.4f}",
+                "mlm":  f"{outputs['loss_mlm'].item():.4f}",
+                "rtd":  f"{outputs['loss_disc'].item():.4f}",
+            })
 
         # ── 8.7 Evaluation ────────────────────────────────────────────────────
-        print(f"\n[Eval] Evaluating on dev set (epoch {epoch}) ...")
-        # Use lambda_max for eval so discriminator is always active
         eval_metrics = evaluate(model, dev_loader, DEVICE, lam=LAMBDA_MAX)
 
         avg_mlm = epoch_mlm_loss / max(n_batches, 1)
@@ -653,7 +631,6 @@ def main():
 
         save_checkpoint(model, epoch, epoch_report, is_best)
 
-        # Save incremental report
         with open(REPORT_PATH, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         print(f"  [Report] Updated: {REPORT_PATH}")
@@ -663,7 +640,7 @@ def main():
     plot_and_save_graphs(report)
 
     print("\n[Done] Training complete.")
-    print(f"  Best F1 on dev: {best_f1:.4f}")
+    print(f"  Best F1 on dev : {best_f1:.4f}")
     print(f"  Report saved to: {REPORT_PATH}")
     print(f"  Graphs saved to: {GRAPHS_DIR}")
 
