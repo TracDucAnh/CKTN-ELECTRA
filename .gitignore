@@ -1,0 +1,41 @@
+# --- Python & Cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# --- Machine Learning / NLP Specific ---
+# Loại bỏ các file weights và checkpoint
+*.pt
+*.pth
+*.bin
+*.ckpt
+checkpoint/
+generator/
+discriminator/
+best_model/
+
+# Loại bỏ dữ liệu thô và index tìm kiếm
+data/
+datasets/
+*.index
+*.sqlite
+
+# --- OS & IDE ---
+.DS_Store
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# --- Logs & Archives ---
+*.log
+*.zip
+*.tar.gz
+*.7z
+
+#-- Datasets ---
+corpus/

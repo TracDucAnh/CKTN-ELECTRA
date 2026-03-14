@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CKTN-ELECTRA — requirements.txt
+# Covers: CKTN-ELECTRA.py (architecture) + training.py
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# PyTorch with CUDA (recommended, adjust cu*** to match your driver):
+#   pip install torch>=2.2.0 --index-url https://download.pytorch.org/whl/cu121
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Deep learning core ───────────────────────────────────────────────────────
+# CKTN-ELECTRA.py: torch, torch.nn, dataclasses (stdlib)
+# training.py:     torch, torch.nn, torch.utils.data
+torch>=2.2.0
+
+# ── Hugging Face ecosystem ───────────────────────────────────────────────────
+# CKTN-ELECTRA.py: AutoTokenizer, AutoModel, AutoConfig,
+#                  RemBertConfig, RemBertModel
+# training.py:     AutoTokenizer, AutoConfig,
+#                  get_linear_schedule_with_warmup
+transformers>=4.40.0
+
+# Tokenizer backend — slow SentencePiece tokenizer required by RemBERT
+# (AutoTokenizer(..., use_fast=False) depends on sentencepiece)
+sentencepiece>=0.2.0
+
+# Model/tokenizer download and caching from Hugging Face Hub
+huggingface-hub>=1.0.0
+
+# ── Numerics ─────────────────────────────────────────────────────────────────
+# training.py: np.random.choice, np.concatenate, np.random.randint
+numpy>=1.24.0
+
+# ── Evaluation metrics ───────────────────────────────────────────────────────
+# training.py: accuracy_score, f1_score
+scikit-learn>=1.3.0
+
+# ── Plotting ─────────────────────────────────────────────────────────────────
+# training.py: matplotlib.pyplot, Agg backend
+matplotlib>=3.7.0
+
+# ── Progress / utilities (pulled in transitively, pinned for safety) ─────────
+tqdm>=4.65.0
+
+# ── Optional: multi-GPU / mixed-precision training ───────────────────────────
+# Not imported directly by the scripts but recommended for large-scale runs.
+# Uncomment if needed:
+# accelerate>=1.0.0
