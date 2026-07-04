@@ -2,7 +2,7 @@
 push_to_hub.py — Push CKTN-ELECTRA discriminator weights to Hugging Face Hub.
 
 Loads the best discriminator checkpoint from:
-    main/checkpoint/discriminator/discriminator_best.pt
+    quarter_generator_variant/checkpoint/discriminator/discriminator_best.pt
 
 Rebuilds a full RemBertModel with the trained weights, then pushes to:
     ducanhdinh/CKTN-ELECTRA
@@ -11,9 +11,8 @@ HF token is read from .env (project root):
     HUGGINGFACE_HUB = "hf_..."
 
 Usage:
-    cd main
-    python push_to_hub.py
-    python push_to_hub.py --checkpoint checkpoint/discriminator/discriminator_epoch3.pt
+    python quarter_generator_variant/push_to_hub.py
+    python quarter_generator_variant/push_to_hub.py --checkpoint quarter_generator_variant/checkpoint/discriminator/discriminator_epoch3.pt
 """
 
 import argparse
@@ -98,7 +97,7 @@ def get_disc_checkpoint_name() -> str:
     spec   = importlib.util.spec_from_file_location("cktn_electra", _ARCH_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.DISCRIMINATOR_CHECKPOINT          # "ducanhdinh/CKTN-EKECTRA"
+    return module.DISCRIMINATOR_CHECKPOINT          # "ducanhdinh/CKTN-ELECTRA"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,8 +107,7 @@ def get_disc_checkpoint_name() -> str:
 def rebuild_discriminator(ckpt_path: Path, base_ckpt: str) -> RemBertModel:
     """
     Instantiate RemBertModel from base_ckpt config, then overwrite its weights
-    with the saved discriminator state (shared_embeddings + embeddings_project
-    + encoder).
+    with the saved discriminator state (shared_embeddings + encoder).
     """
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
@@ -129,11 +127,6 @@ def rebuild_discriminator(ckpt_path: Path, base_ckpt: str) -> RemBertModel:
     emb.token_type_embeddings.weight.data.copy_(se["token_type_embeddings.weight"])
     emb.LayerNorm.weight            .data.copy_(se["LayerNorm.weight"])
     emb.LayerNorm.bias              .data.copy_(se["LayerNorm.bias"])
-
-    # ── Embeddings projection (embedding_size → hidden_size) ──────────────────
-    ep = state["embeddings_project"]
-    model.embeddings_project.weight.data.copy_(ep["weight"])
-    model.embeddings_project.bias  .data.copy_(ep["bias"])
 
     # ── Transformer encoder ───────────────────────────────────────────────────
     model.encoder.load_state_dict(state["encoder"])

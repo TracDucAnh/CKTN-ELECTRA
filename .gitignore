@@ -14,14 +14,18 @@ venv/
 *.pth
 *.bin
 *.ckpt
+*.pkl
+cache/
 checkpoint/
 generator/
 discriminator/
 best_model/
+quarter_generator_variant/downstream/
 
 # Loại bỏ dữ liệu thô và index tìm kiếm
 data/
 datasets/
+drive_folder_*/
 *.index
 *.sqlite
 

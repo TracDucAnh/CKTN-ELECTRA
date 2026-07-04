@@ -2,26 +2,26 @@
 CKTN-ELECTRA: ELECTRA-style continued pre-training architecture
 for Vietnamese ethnic minority languages (Cham, Khmer, Tay-Nung).
 
-Discriminator  : ducanhdinh/CKTN-EKECTRA (vocab-augmented RemBERT)
+Discriminator  : ducanhdinh/CKTN-ELECTRA (vocab-augmented RemBERT)
                  32 layers | hidden=1152 | heads=18 | vocab=254,513
 Generator      : ~1/4 discriminator size (auto-computed)
-                 ~8 layers | same hidden & heads (for embedding compatibility)
+                 ~8 layers | same hidden & heads
 Shared         : token embeddings (E_token) + position embeddings (E_pos)
-Lambda schedule: λ=0 (ep 1-2) → linear to λ_max=50 (ep 2-3) → fixed (ep 4-5)
+Lambda schedule: λ=0 (ep 1-2) → linear to λ_max=50 (ep 2-3) → fixed (ep 4-6)
 """
 
-import math
+import unicodedata
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 from transformers import (
     AutoTokenizer,
     AutoModel,
     AutoConfig,
     RemBertConfig,
-    RemBertModel,
 )
 
 
@@ -29,11 +29,11 @@ from transformers import (
 # 1. Config
 # ──────────────────────────────────────────────────────────────────────────────
 
-DISCRIMINATOR_CHECKPOINT = "ducanhdinh/CKTN-EKECTRA"
+DISCRIMINATOR_CHECKPOINT = "ducanhdinh/CKTN-ELECTRA"
 
 # Training hyper-parameters (from paper)
 TRAINING_CONFIG = dict(
-    total_epochs   = 5,
+    total_epochs   = 6,
     mask_rate      = 0.15,
     seq_len        = 512,
     lr             = 2e-5,
@@ -41,11 +41,68 @@ TRAINING_CONFIG = dict(
     weight_decay   = 0.01,
     grad_norm      = 1.0,
     lambda_max     = 50.0,
+    replacement_top_k       = 64,
+    replacement_temperature = 1.25,
+    replacement_rho_min     = 0.15,
+    replacement_rho_max     = 0.95,
     # Lambda schedule (epoch boundaries, 1-indexed)
     lambda_zero_until_epoch   = 2,   # epochs 1-2 : λ = 0
     lambda_ramp_until_epoch   = 3,   # epoch  2-3 : linear ramp
-    lambda_fixed_from_epoch   = 3,   # epochs 4-5 : λ = λ_max
 )
+
+
+SCRIPT_SHARED = 0
+SCRIPT_LATIN = 1
+SCRIPT_KHMER = 2
+SCRIPT_OTHER = 3
+
+
+@dataclass(frozen=True)
+class ReplacementSamplerConfig:
+    """Difficulty calibration settings for generator replacements."""
+
+    top_k: int
+    temperature: float
+    rho_min: float
+    rho_max: float
+
+
+def _token_surface(token: str) -> str:
+    """Remove common tokenizer markers before script/noise checks."""
+    return token.replace("▁", "").replace("##", "").strip()
+
+
+def _is_noise_surface(surface: str) -> bool:
+    """True for punctuation-only, digit-heavy, or formatting-token surfaces."""
+    chars = [ch for ch in surface if not ch.isspace()]
+    if not chars:
+        return True
+
+    alpha_count = sum(ch.isalpha() for ch in chars)
+    digit_count = sum(ch.isdigit() for ch in chars)
+    symbol_count = sum(
+        unicodedata.category(ch)[0] in {"P", "S", "C"}
+        for ch in chars
+    )
+    return alpha_count == 0 or digit_count > alpha_count or symbol_count == len(chars)
+
+
+def _script_profile(surface: str) -> int:
+    """Coarse script class used for local replacement compatibility."""
+    has_khmer = any("\u1780" <= ch <= "\u17ff" for ch in surface)
+    has_latin = any(
+        ch.isalpha() and "LATIN" in unicodedata.name(ch, "")
+        for ch in surface
+    )
+    has_alpha = any(ch.isalpha() for ch in surface)
+
+    if has_khmer and not has_latin:
+        return SCRIPT_KHMER
+    if has_latin and not has_khmer:
+        return SCRIPT_LATIN
+    if not has_alpha:
+        return SCRIPT_SHARED
+    return SCRIPT_OTHER
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -242,7 +299,7 @@ class Generator(nn.Module):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class DiscriminatorRTDHead(nn.Module):
-    """Binary classification head: original (0) vs replaced (1)."""
+    """Binary classification head: original (1) vs replaced (0)."""
 
     def __init__(self, hidden_size: int):
         super().__init__()
@@ -257,7 +314,7 @@ class DiscriminatorRTDHead(nn.Module):
 
 class Discriminator(nn.Module):
     """
-    Full RemBERT encoder (32 layers) initialized from CKTN-EKECTRA checkpoint.
+    Full RemBERT encoder (32 layers) initialized from CKTN-ELECTRA checkpoint.
     Embeddings are replaced with the shared ones from CKTNElectra.
 
     Architecture:
@@ -299,7 +356,122 @@ class Discriminator(nn.Module):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. Main CKTN-ELECTRA Model
+# 6. Difficulty-Calibrated Replacement Sampler
+# ──────────────────────────────────────────────────────────────────────────────
+
+class DifficultyCalibratedSampler(nn.Module):
+    """
+    Samples generator replacements from a filtered top-k band.
+
+    Filters implement the methodology's identity, punctuation/artifact, script,
+    and embedding-similarity constraints. If no candidate survives at a position,
+    the original token is kept unchanged.
+    """
+
+    def __init__(
+        self,
+        config: RemBertConfig,
+        sampler_config: ReplacementSamplerConfig,
+        tokenizer: Optional[AutoTokenizer] = None,
+    ):
+        super().__init__()
+        self.config = sampler_config
+
+        token_is_special = torch.zeros(config.vocab_size, dtype=torch.bool)
+        token_is_noise = torch.zeros(config.vocab_size, dtype=torch.bool)
+        token_script = torch.full((config.vocab_size,), SCRIPT_SHARED, dtype=torch.long)
+
+        if tokenizer is not None:
+            special_ids = {
+                tid for tid in tokenizer.all_special_ids
+                if tid is not None and 0 <= tid < config.vocab_size
+            }
+            tokens = tokenizer.convert_ids_to_tokens(list(range(config.vocab_size)))
+            for token_id, token in enumerate(tokens):
+                surface = _token_surface(str(token))
+                token_is_special[token_id] = token_id in special_ids
+                token_is_noise[token_id] = _is_noise_surface(surface)
+                token_script[token_id] = _script_profile(surface)
+
+        self.register_buffer("token_is_special", token_is_special, persistent=False)
+        self.register_buffer("token_is_noise", token_is_noise, persistent=False)
+        self.register_buffer("token_script", token_script, persistent=False)
+
+    @staticmethod
+    def _script_compatible(
+        candidate_script: torch.Tensor,
+        original_script: torch.Tensor,
+    ) -> torch.Tensor:
+        same_script = candidate_script == original_script
+        candidate_shared = candidate_script == SCRIPT_SHARED
+        return same_script | candidate_shared
+
+    @torch.no_grad()
+    def forward(
+        self,
+        gen_logits: torch.Tensor,
+        original_ids: torch.Tensor,
+        is_masked: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        embedding_weight: torch.Tensor,
+    ) -> dict:
+        top_k = min(self.config.top_k, gen_logits.size(-1))
+        top_logits, top_ids = torch.topk(gen_logits, k=top_k, dim=-1)
+
+        active_mask = is_masked
+        if attention_mask is not None:
+            active_mask = active_mask & attention_mask.bool()
+
+        original_ids_expanded = original_ids.unsqueeze(-1)
+        valid = top_ids != original_ids_expanded
+        valid = valid & ~self.token_is_special[top_ids]
+
+        original_noise = self.token_is_noise[original_ids].unsqueeze(-1)
+        candidate_noise = self.token_is_noise[top_ids]
+        valid = valid & (~candidate_noise | original_noise)
+
+        original_script = self.token_script[original_ids].unsqueeze(-1)
+        candidate_script = self.token_script[top_ids]
+        valid = valid & self._script_compatible(candidate_script, original_script)
+
+        original_emb = F.embedding(original_ids, embedding_weight)
+        candidate_emb = F.embedding(top_ids, embedding_weight)
+        similarity = F.cosine_similarity(
+            candidate_emb, original_emb.unsqueeze(-2), dim=-1
+        )
+        valid = (
+            valid
+            & (similarity >= self.config.rho_min)
+            & (similarity <= self.config.rho_max)
+        )
+        valid = valid & active_mask.unsqueeze(-1)
+
+        temperature = max(self.config.temperature, 1e-6)
+        calibrated_logits = (top_logits / temperature).masked_fill(~valid, -1e9)
+        calibrated_probs = torch.softmax(calibrated_logits, dim=-1)
+        sampled_index = torch.multinomial(
+            calibrated_probs.reshape(-1, top_k), num_samples=1
+        ).view(original_ids.shape)
+
+        sampled_ids = top_ids.gather(-1, sampled_index.unsqueeze(-1)).squeeze(-1)
+        sampled_valid = valid.gather(-1, sampled_index.unsqueeze(-1)).squeeze(-1)
+        replacement_mask = sampled_valid & (sampled_ids != original_ids)
+        corrupted_ids = torch.where(replacement_mask, sampled_ids, original_ids)
+
+        active_count = active_mask.float().sum().clamp_min(1.0)
+        valid_candidate_rate = (valid.any(dim=-1) & active_mask).float().sum() / active_count
+        replacement_rate = replacement_mask.float().sum() / active_count
+
+        return {
+            "corrupted_ids": corrupted_ids,
+            "replacement_mask": replacement_mask,
+            "replacement_rate": replacement_rate,
+            "valid_candidate_rate": valid_candidate_rate,
+        }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. Main CKTN-ELECTRA Model
 # ──────────────────────────────────────────────────────────────────────────────
 
 class CKTNElectra(nn.Module):
@@ -307,19 +479,23 @@ class CKTNElectra(nn.Module):
     CKTN-ELECTRA model combining:
       - SharedEmbeddings   (E_token + E_pos, updated by both losses)
       - Generator          (~1/4 disc size, trained from scratch)
-      - Discriminator      (init from CKTN-EKECTRA, 32-layer RemBERT)
+      - Discriminator      (init from CKTN-ELECTRA, 32-layer RemBERT)
 
     Training flow (per step):
       1. SharedEmbeddings encodes the (possibly masked) input.
       2. Generator produces MLM logits → LMLM.
-      3. Generator samples replacement tokens → corrupted sequence.
+      3. Calibrated sampler builds replacement tokens → corrupted sequence.
       4. SharedEmbeddings encodes corrupted sequence.
       5. Discriminator produces RTD logits → LDisc.
       6. Total loss: L = LMLM + λ(t) * LDisc
          (gradients flow through shared embeddings from both terms)
     """
 
-    def __init__(self, load_pretrained: bool = True):
+    def __init__(
+        self,
+        load_pretrained: bool = True,
+        tokenizer: Optional[AutoTokenizer] = None,
+    ):
         super().__init__()
 
         # ── Load discriminator config & weights ──────────────────────────────
@@ -340,6 +516,16 @@ class CKTNElectra(nn.Module):
 
         # ── Discriminator ─────────────────────────────────────────────────────
         self.discriminator = Discriminator(disc_config)
+        self.replacement_sampler = DifficultyCalibratedSampler(
+            disc_config,
+            ReplacementSamplerConfig(
+                top_k=TRAINING_CONFIG["replacement_top_k"],
+                temperature=TRAINING_CONFIG["replacement_temperature"],
+                rho_min=TRAINING_CONFIG["replacement_rho_min"],
+                rho_max=TRAINING_CONFIG["replacement_rho_max"],
+            ),
+            tokenizer=tokenizer,
+        )
 
         if load_pretrained:
             self._load_pretrained_discriminator(disc_config)
@@ -350,9 +536,8 @@ class CKTNElectra(nn.Module):
 
     def _load_pretrained_discriminator(self, disc_config: RemBertConfig):
         """
-        Load CKTN-EKECTRA weights into:
+        Load CKTN-ELECTRA weights into:
           - shared_embeddings        (word, position, token_type, LayerNorm)
-          - discriminator.embeddings_project
           - discriminator.encoder
         Generator is intentionally left randomly initialized.
         """
@@ -409,6 +594,7 @@ class CKTNElectra(nn.Module):
             loss_disc      : discriminator RTD loss (0 if lam == 0)
             gen_logits     : [B, L, V]
             disc_logits    : [B, L, 1]  (None if lam == 0)
+            rtd_labels     : [B, L]  1=original, 0=replaced
         """
         # ── Step 1: Embed masked input ────────────────────────────────────────
         embedded_masked = self.shared_embeddings(
@@ -422,33 +608,39 @@ class CKTNElectra(nn.Module):
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             loss_mlm = loss_fct(
-                gen_logits.view(-1, gen_logits.size(-1)), labels.view(-1)
+                gen_logits.reshape(-1, gen_logits.size(-1)), labels.reshape(-1)
             )
 
-        # ── Step 3: Sample replacement tokens ────────────────────────────────
-        # We do this even when lam==0 so the graph is consistent, but
-        # disc_loss will be zero-weighted and won't affect gradients.
-        with torch.no_grad():
-            gen_probs        = torch.softmax(gen_logits, dim=-1)
-            sampled_ids      = torch.multinomial(
-                gen_probs.view(-1, gen_probs.size(-1)), num_samples=1
-            ).view(input_ids.shape)                          # [B, L]
-
-        # Build corrupted input: replace masked positions with generator samples
         if labels is not None:
-            is_masked       = labels != -100                 # [B, L]
-            corrupted_ids   = torch.where(is_masked, sampled_ids, input_ids)
-            # RTD labels: 1 = replaced, 0 = original
-            rtd_labels      = (corrupted_ids != input_ids).float()
-            # But we only label positions that were originally masked
-            rtd_label_mask  = is_masked
-        else:
-            corrupted_ids  = input_ids
-            rtd_labels     = torch.zeros_like(input_ids, dtype=torch.float)
-            rtd_label_mask = torch.ones_like(input_ids, dtype=torch.bool)
+            is_masked = labels != -100
+            original_ids = torch.where(is_masked, labels, input_ids)
+        if labels is None:
+            is_masked = torch.zeros_like(input_ids, dtype=torch.bool)
+            original_ids = input_ids
+
+        # ── Step 3: Difficulty-calibrated replacement sampling ───────────────
+        sample = self.replacement_sampler(
+            gen_logits=gen_logits,
+            original_ids=original_ids,
+            is_masked=is_masked,
+            attention_mask=attention_mask,
+            embedding_weight=self.shared_embeddings.word_embeddings.weight,
+        )
+        corrupted_ids = sample["corrupted_ids"]
+        replacement_mask = sample["replacement_mask"]
+
+        # RTD labels follow the method: 1 = original, 0 = replaced.
+        rtd_labels = (~replacement_mask).float()
+        rtd_label_mask = (
+            attention_mask.bool()
+            if attention_mask is not None
+            else torch.ones_like(input_ids, dtype=torch.bool)
+        )
 
         loss_disc  = torch.tensor(0.0, device=input_ids.device)
         disc_logits = None
+        avg_disc_confidence = torch.tensor(0.0, device=input_ids.device)
+        rtd_entropy = torch.tensor(0.0, device=input_ids.device)
 
         # ── Step 4 & 5: Discriminator RTD ────────────────────────────────────
         if lam > 0.0:
@@ -465,12 +657,21 @@ class CKTNElectra(nn.Module):
                 disc_logits.squeeze(-1),                     # [B, L]
                 rtd_labels,
             )
-            if attention_mask is not None:
-                disc_loss_all = disc_loss_all * attention_mask.float()
-            loss_disc = disc_loss_all.sum() / (
-                attention_mask.float().sum() if attention_mask is not None
-                else disc_loss_all.numel()
+            disc_loss_all = disc_loss_all * rtd_label_mask.float()
+            active_count = rtd_label_mask.float().sum().clamp_min(1.0)
+            loss_disc = disc_loss_all.sum() / active_count
+
+            disc_probs = torch.sigmoid(disc_logits.squeeze(-1))
+            disc_probs = disc_probs.clamp(1e-6, 1.0 - 1e-6)
+            confidence = torch.maximum(disc_probs, 1.0 - disc_probs)
+            entropy = -(
+                disc_probs * disc_probs.log()
+                + (1.0 - disc_probs) * (1.0 - disc_probs).log()
             )
+            avg_disc_confidence = (
+                confidence * rtd_label_mask.float()
+            ).sum() / active_count
+            rtd_entropy = (entropy * rtd_label_mask.float()).sum() / active_count
 
         # ── Step 6: Combined loss ─────────────────────────────────────────────
         loss = loss_mlm + lam * loss_disc
@@ -481,11 +682,19 @@ class CKTNElectra(nn.Module):
             loss_disc   = loss_disc,
             gen_logits  = gen_logits,
             disc_logits = disc_logits,
+            corrupted_ids = corrupted_ids,
+            replacement_mask = replacement_mask,
+            rtd_labels = rtd_labels,
+            rtd_label_mask = rtd_label_mask,
+            replacement_rate = sample["replacement_rate"],
+            valid_candidate_rate = sample["valid_candidate_rate"],
+            avg_disc_confidence = avg_disc_confidence,
+            rtd_entropy = rtd_entropy,
         )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. Parameter group utilities
+# 8. Parameter group utilities
 # ──────────────────────────────────────────────────────────────────────────────
 
 def get_parameter_groups(model: CKTNElectra, weight_decay: float = 0.01):
@@ -519,7 +728,7 @@ def get_parameter_groups(model: CKTNElectra, weight_decay: float = 0.01):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 8. Training loop skeleton
+# 9. Training loop skeleton
 # ──────────────────────────────────────────────────────────────────────────────
 
 def train(
@@ -569,7 +778,7 @@ def train(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. Quick smoke-test (no GPU, no real data needed)
+# 10. Quick smoke-test (no GPU, no real data needed)
 # ──────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
