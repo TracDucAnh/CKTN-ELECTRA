@@ -1,0 +1,3 @@
+Figure X. Ablation results for CKTN-ELECTRA on category classification. The full method is compared with variants that remove script-aware replacement filtering or the linear lambda schedule. Bars report the best saved downstream checkpoint using accuracy and macro-F1.
+
+Figure Y. Ablation results for CKTN-ELECTRA on information retrieval. The full method is compared with variants that remove script-aware replacement filtering or the linear lambda schedule. Bars report the best saved downstream checkpoint using MRR@10 and Recall@10.

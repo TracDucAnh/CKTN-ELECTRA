@@ -402,9 +402,7 @@ class DifficultyCalibratedSampler(nn.Module):
         candidate_script: torch.Tensor,
         original_script: torch.Tensor,
     ) -> torch.Tensor:
-        same_script = candidate_script == original_script
-        candidate_shared = candidate_script == SCRIPT_SHARED
-        return same_script | candidate_shared
+        return torch.ones_like(candidate_script, dtype=torch.bool)
 
     @torch.no_grad()
     def forward(

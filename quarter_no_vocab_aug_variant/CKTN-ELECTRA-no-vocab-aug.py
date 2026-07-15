@@ -2,8 +2,8 @@
 CKTN-ELECTRA: ELECTRA-style continued pre-training architecture
 for Vietnamese ethnic minority languages (Cham, Khmer, Tay-Nung).
 
-Discriminator  : ducanhdinh/CKTN-ELECTRA (vocab-augmented RemBERT)
-                 32 layers | hidden=1152 | heads=18 | vocab=254,513
+Discriminator  : google/rembert (no CKTN vocab augmentation)
+                 32 layers | hidden=1152 | heads=18 | vocab=250,300
 Generator      : ~1/4 discriminator size (auto-computed)
                  ~8 layers | same hidden & heads
 Shared         : token embeddings (E_token) + position embeddings (E_pos)
@@ -29,7 +29,7 @@ from transformers import (
 # 1. Config
 # ──────────────────────────────────────────────────────────────────────────────
 
-DISCRIMINATOR_CHECKPOINT = "ducanhdinh/CKTN-ELECTRA"
+DISCRIMINATOR_CHECKPOINT = "google/rembert"
 
 # Training hyper-parameters (from paper)
 TRAINING_CONFIG = dict(
@@ -479,7 +479,7 @@ class CKTNElectra(nn.Module):
     CKTN-ELECTRA model combining:
       - SharedEmbeddings   (E_token + E_pos, updated by both losses)
       - Generator          (~1/4 disc size, trained from scratch)
-      - Discriminator      (init from CKTN-ELECTRA, 32-layer RemBERT)
+      - Discriminator      (init from RemBERT, 32-layer RemBERT)
 
     Training flow (per step):
       1. SharedEmbeddings encodes the (possibly masked) input.
@@ -536,7 +536,7 @@ class CKTNElectra(nn.Module):
 
     def _load_pretrained_discriminator(self, disc_config: RemBertConfig):
         """
-        Load CKTN-ELECTRA weights into:
+        Load RemBERT weights into:
           - shared_embeddings        (word, position, token_type, LayerNorm)
           - discriminator.encoder
         Generator is intentionally left randomly initialized.

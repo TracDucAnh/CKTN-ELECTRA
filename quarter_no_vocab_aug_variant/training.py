@@ -16,7 +16,7 @@ Directory layout assumed:
                 report.json
 
 Usage:
-    python quarter_generator_variant/training.py
+    python quarter_no_vocab_aug_variant/training.py
 """
 
 import importlib.util
@@ -46,7 +46,7 @@ from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HERE = Path(__file__).parent.resolve()
-_ARCH_PATH = _HERE / "CKTN-ELECTRA-quarter-no-linear.py"
+_ARCH_PATH = _HERE / "CKTN-ELECTRA-no-vocab-aug.py"
 
 spec = importlib.util.spec_from_file_location("cktn_electra", _ARCH_PATH)
 cktn_module = importlib.util.module_from_spec(spec)
@@ -701,7 +701,7 @@ def main():
     batch_size = args.batch_size
 
     print("=" * 70)
-    print("CKTN-ELECTRA — No Linear Lambda Training Script")
+    print("CKTN-ELECTRA — No Vocab-Augmentation Training Script")
     print(f"Batch size: {batch_size}")
     if args.resume is not None:
         print(f"Resume: {args.resume}")
@@ -756,9 +756,20 @@ def main():
         num_training_steps = total_steps,
     )
 
+    # ── 8.5 Lambda scheduler ─────────────────────────────────────────────────
+    lambda_scheduler = LinearLambdaScheduler(
+        lambda_max        = LAMBDA_MAX,
+        zero_until_epoch  = TRAINING_CONFIG["lambda_zero_until_epoch"],   # 2
+        ramp_until_epoch  = TRAINING_CONFIG["lambda_ramp_until_epoch"],   # 3
+        total_epochs      = TOTAL_EPOCHS,
+        steps_per_epoch   = steps_per_epoch,
+    )
+
     print(f"\n[Training] Steps per epoch : {steps_per_epoch}")
     print(f"[Training] Total steps     : {total_steps} | Warmup: {warmup_steps}")
-    print(f"[Training] Lambda schedule : fixed λ = {LAMBDA_MAX} from step 0.\n")
+    print(f"[Training] Lambda schedule : 0 until epoch {TRAINING_CONFIG['lambda_zero_until_epoch']}, "
+          f"ramp to {LAMBDA_MAX} by epoch {TRAINING_CONFIG['lambda_ramp_until_epoch']}, "
+          f"fixed afterwards.\n")
 
     # ── 8.6 Training state ────────────────────────────────────────────────────
     report: List[Dict] = []
@@ -803,7 +814,7 @@ def main():
         pbar = tqdm(train_loader, desc="  Training", leave=True)
         for batch in pbar:
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
-            lam   = LAMBDA_MAX
+            lam   = lambda_scheduler.get_lambda(global_step)
 
             outputs = model(
                 input_ids      = batch["input_ids"],

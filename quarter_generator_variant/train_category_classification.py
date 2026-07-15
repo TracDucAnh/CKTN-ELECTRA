@@ -119,6 +119,12 @@ def parse_args() -> argparse.Namespace:
         help="Encoder benchmark to fine-tune",
     )
     parser.add_argument(
+        "--model_name_or_path",
+        type=Path,
+        default=None,
+        help="Optional local/HF base checkpoint override.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=Path,
         default=None,
@@ -365,7 +371,8 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = load_tokenizer(args.model_key)
+    tokenizer = load_tokenizer(args.model_key, args.model_name_or_path)
+    model_id = model_id_for_key(args.model_key, args.model_name_or_path)
     train_records = read_records("train")
     dev_records = read_records("dev")
     label_to_id = build_label_map(train_records)
@@ -404,12 +411,12 @@ def main():
         args.diagnostics_top_k,
     )
     diagnostics["model_key"] = args.model_key
-    diagnostics["model_id"] = model_id_for_key(args.model_key)
+    diagnostics["model_id"] = model_id
     diagnostics["pooling"] = args.pooling
     save_json(args.output_dir / "label_diagnostics.json", diagnostics)
 
-    encoder = load_encoder(args.model_key, args.checkpoint)
-    print(f"[Model] Loaded encoder: {args.model_key} ({model_id_for_key(args.model_key)})")
+    encoder = load_encoder(args.model_key, args.checkpoint, args.model_name_or_path)
+    print(f"[Model] Loaded encoder: {args.model_key} ({model_id})")
     if args.model_key == "cktn":
         print(f"[Model] Loaded discriminator checkpoint: {args.checkpoint}")
 
@@ -459,7 +466,7 @@ def main():
         row = {
             "epoch": epoch,
             "model_key": args.model_key,
-            "model_id": model_id_for_key(args.model_key),
+            "model_id": model_id,
             "pooling": args.pooling,
             "train_loss": round(train_loss, 6),
             "dev_loss": round(metrics["loss"], 6),

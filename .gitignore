@@ -43,3 +43,7 @@ drive_folder_*/
 
 #-- Datasets ---
 corpus/
+quarter_generator_variant/cpt_baselines
+quarter_and_no_linear_lambda_variant/downstream
+quarter_no_script_aware_variant/downstream
+quarter_no_vocab_aug_variant/downstream

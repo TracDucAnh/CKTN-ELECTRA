@@ -206,6 +206,12 @@ def parse_args() -> argparse.Namespace:
         help="Encoder benchmark to fine-tune",
     )
     parser.add_argument(
+        "--model_name_or_path",
+        type=Path,
+        default=None,
+        help="Optional local/HF base checkpoint override.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=Path,
         default=None,
@@ -461,7 +467,8 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = load_tokenizer(args.model_key)
+    tokenizer = load_tokenizer(args.model_key, args.model_name_or_path)
+    model_id = model_id_for_key(args.model_key, args.model_name_or_path)
     train_records = read_records("train")
     dev_records = read_records("dev")
 
@@ -506,7 +513,7 @@ def main():
         args.output_dir / "data_diagnostics.json",
         {
             "model_key": args.model_key,
-            "model_id": model_id_for_key(args.model_key),
+            "model_id": model_id,
             "train_stats": dict(train_dataset.stats),
             "train_query_sources": dict(train_dataset.query_sources),
             "dev_query_sources": eval_sets["query_sources"],
@@ -519,8 +526,8 @@ def main():
         },
     )
 
-    encoder = load_encoder(args.model_key, args.checkpoint)
-    print(f"[Model] Loaded encoder: {args.model_key} ({model_id_for_key(args.model_key)})")
+    encoder = load_encoder(args.model_key, args.checkpoint, args.model_name_or_path)
+    print(f"[Model] Loaded encoder: {args.model_key} ({model_id})")
     if args.model_key == "cktn":
         print(f"[Model] Loaded discriminator checkpoint: {args.checkpoint}")
     model = BiEncoderRetriever(encoder, args.temperature).to(device)
@@ -554,7 +561,7 @@ def main():
         row = {
             "epoch": epoch,
             "model_key": args.model_key,
-            "model_id": model_id_for_key(args.model_key),
+            "model_id": model_id,
             "train_loss": round(train_loss, 6),
             "mrr_at_10": round(metrics["mrr_at_10"], 6),
             "recall_at_1": round(metrics["recall_at_1"], 6),

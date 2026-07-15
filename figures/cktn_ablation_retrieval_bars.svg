@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="430" viewBox="0 0 1320 430">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="660.0" y="42" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="700" text-anchor="middle" fill="#1c1c1c">CKTN-ELECTRA Ablation: Information Retrieval</text>
+<text x="660.0" y="70" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="400" text-anchor="middle" fill="#555">MRR@10 and Recall@10 for the full method and two ablations.</text>
+<text x="350.0" y="124" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" text-anchor="middle" fill="#1c1c1c">IR MRR@10</text>
+<line x1="94" y1="302" x2="642" y2="302" stroke="#4b4b4b" stroke-width="1.2"/>
+<line x1="94" y1="144" x2="94" y2="302" stroke="#4b4b4b" stroke-width="1.2"/>
+<line x1="94" y1="302.0" x2="642" y2="302.0" stroke="#ececec" stroke-width="1"/>
+<text x="84" y="306.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.00</text>
+<line x1="94" y1="262.5" x2="642" y2="262.5" stroke="#ececec" stroke-width="1"/>
+<text x="84" y="266.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.25</text>
+<line x1="94" y1="223.0" x2="642" y2="223.0" stroke="#ececec" stroke-width="1"/>
+<text x="84" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.50</text>
+<line x1="94" y1="183.5" x2="642" y2="183.5" stroke="#ececec" stroke-width="1"/>
+<text x="84" y="187.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.75</text>
+<line x1="94" y1="144.0" x2="642" y2="144.0" stroke="#ececec" stroke-width="1"/>
+<text x="84" y="148.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">1.00</text>
+<rect x="164.33333333333331" y="180.0556" width="42" height="121.9444" rx="2" fill="#1f6f78"/>
+<text x="185.33333333333331" y="173.0556" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.7718</text>
+<text x="185.33333333333331" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">Main</text>
+<text x="185.33333333333331" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">method</text>
+<rect x="347.0" y="180.68918000000002" width="42" height="121.31081999999999" rx="2" fill="#c65d32"/>
+<text x="368.0" y="173.68918000000002" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.7678</text>
+<text x="368.0" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">No</text>
+<text x="368.0" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">script-aware</text>
+<rect x="529.6666666666666" y="180.154982" width="42" height="121.84501800000001" rx="2" fill="#5b5f97"/>
+<text x="550.6666666666666" y="173.154982" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.7712</text>
+<text x="550.6666666666666" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">No</text>
+<text x="550.6666666666666" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">linear lambda</text>
+<text x="1010.0" y="124" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" text-anchor="middle" fill="#1c1c1c">IR Recall@10</text>
+<line x1="754" y1="302" x2="1302" y2="302" stroke="#4b4b4b" stroke-width="1.2"/>
+<line x1="754" y1="144" x2="754" y2="302" stroke="#4b4b4b" stroke-width="1.2"/>
+<line x1="754" y1="302.0" x2="1302" y2="302.0" stroke="#ececec" stroke-width="1"/>
+<text x="744" y="306.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.00</text>
+<line x1="754" y1="262.5" x2="1302" y2="262.5" stroke="#ececec" stroke-width="1"/>
+<text x="744" y="266.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.25</text>
+<line x1="754" y1="223.0" x2="1302" y2="223.0" stroke="#ececec" stroke-width="1"/>
+<text x="744" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.50</text>
+<line x1="754" y1="183.5" x2="1302" y2="183.5" stroke="#ececec" stroke-width="1"/>
+<text x="744" y="187.5" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">0.75</text>
+<line x1="754" y1="144.0" x2="1302" y2="144.0" stroke="#ececec" stroke-width="1"/>
+<text x="744" y="148.0" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="end" fill="#555">1.00</text>
+<rect x="824.3333333333334" y="159.1838" width="42" height="142.8162" rx="2" fill="#1f6f78"/>
+<text x="845.3333333333334" y="152.1838" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.9039</text>
+<text x="845.3333333333334" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">Main</text>
+<text x="845.3333333333334" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">method</text>
+<rect x="1007.0" y="159.463618" width="42" height="142.536382" rx="2" fill="#c65d32"/>
+<text x="1028.0" y="152.463618" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.9021</text>
+<text x="1028.0" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">No</text>
+<text x="1028.0" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">script-aware</text>
+<rect x="1189.6666666666665" y="159.05345" width="42" height="142.94655" rx="2" fill="#5b5f97"/>
+<text x="1210.6666666666665" y="152.05345" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" text-anchor="middle" fill="#1c1c1c">0.9047</text>
+<text x="1210.6666666666665" y="324" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">No</text>
+<text x="1210.6666666666665" y="339" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="400" text-anchor="middle" fill="#1c1c1c">linear lambda</text>
+<rect x="442" y="391" width="18" height="18" rx="2" fill="#1f6f78"/>
+<text x="469" y="405" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" text-anchor="start" fill="#1c1c1c">Main method</text>
+<rect x="612" y="391" width="18" height="18" rx="2" fill="#c65d32"/>
+<text x="639" y="405" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" text-anchor="start" fill="#1c1c1c">No script-aware</text>
+<rect x="782" y="391" width="18" height="18" rx="2" fill="#5b5f97"/>
+<text x="809" y="405" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" text-anchor="start" fill="#1c1c1c">No linear lambda</text>
+</svg>

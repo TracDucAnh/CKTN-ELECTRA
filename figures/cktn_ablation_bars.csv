@@ -1,0 +1,4 @@
+method,category_accuracy,category_macro_f1,retrieval_mrr_at_10,retrieval_recall_at_10
+Main method,0.921400,0.710300,0.771800,0.903900
+No script-aware,0.030380,0.001229,0.767790,0.902129
+No linear lambda,0.030380,0.001229,0.771171,0.904725

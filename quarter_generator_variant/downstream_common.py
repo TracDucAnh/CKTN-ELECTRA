@@ -2,7 +2,7 @@ import importlib.util
 import json
 import random
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -82,32 +82,51 @@ def join_fields(record: Dict, fields: List[str]) -> str:
     return "\n".join(piece for piece in pieces if piece)
 
 
-def tokenizer_uses_slow(model_key: str) -> bool:
+def tokenizer_uses_slow(
+    model_key: str,
+    model_name_or_path: Optional[Path] = None,
+) -> bool:
+    if model_name_or_path is not None:
+        path = Path(model_name_or_path)
+        if path.exists() and (path / "tokenizer.json").exists():
+            return False
     return model_key in {"cktn", "cktn_original", "rembert"}
 
 
-def model_id_for_key(model_key: str) -> str:
+def model_id_for_key(model_key: str, model_name_or_path: Optional[Path] = None) -> str:
+    if model_name_or_path is not None:
+        return str(model_name_or_path)
     return BENCHMARK_MODELS[model_key]
 
 
-def load_tokenizer(model_key: str = "cktn") -> AutoTokenizer:
+def load_tokenizer(
+    model_key: str = "cktn",
+    model_name_or_path: Optional[Path] = None,
+) -> AutoTokenizer:
     return AutoTokenizer.from_pretrained(
-        model_id_for_key(model_key),
-        use_fast=not tokenizer_uses_slow(model_key),
+        model_id_for_key(model_key, model_name_or_path),
+        use_fast=not tokenizer_uses_slow(model_key, model_name_or_path),
     )
 
 
-def load_encoder(model_key: str, checkpoint_path: Path = DEFAULT_DISCRIMINATOR_CKPT):
+def load_encoder(
+    model_key: str,
+    checkpoint_path: Path = DEFAULT_DISCRIMINATOR_CKPT,
+    model_name_or_path: Optional[Path] = None,
+):
     if model_key == "cktn":
-        return rebuild_encoder(checkpoint_path)
-    return AutoModel.from_pretrained(model_id_for_key(model_key))
+        return rebuild_encoder(checkpoint_path, model_name_or_path)
+    return AutoModel.from_pretrained(model_id_for_key(model_key, model_name_or_path))
 
 
-def rebuild_encoder(checkpoint_path: Path) -> RemBertModel:
+def rebuild_encoder(
+    checkpoint_path: Path,
+    model_name_or_path: Optional[Path] = None,
+) -> RemBertModel:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    config = AutoConfig.from_pretrained(BASE_CHECKPOINT)
+    config = AutoConfig.from_pretrained(model_id_for_key("cktn", model_name_or_path))
     model = RemBertModel(config)
     state = torch.load(checkpoint_path, map_location="cpu")
 
